@@ -29,6 +29,13 @@ st.set_page_config(
 
 
 # ============================================================
+# SETTINGS
+# ============================================================
+
+DEBUG_MONGO = True
+
+
+# ============================================================
 # CSS — DARK BLUE EXECUTIVE THEME
 # ============================================================
 
@@ -216,9 +223,6 @@ def html(markup):
 
 
 def recolored_logo_data_uri(path="kayfa_logo.png", dark_blue=(6, 31, 78)):
-    """
-    Recolors visible pixels of a white/transparent Kayfa logo into dark blue.
-    """
     if Image is None or not os.path.exists(path):
         return None
 
@@ -343,6 +347,12 @@ def style_fig(fig, height=660):
     return fig
 
 
+def show_chart(fig, height=None):
+    if height is not None:
+        fig.update_layout(height=height)
+    st.plotly_chart(fig, width="stretch")
+
+
 def render_action_cards(df):
     if df.empty:
         st.info("No action plan cards available.")
@@ -395,8 +405,11 @@ def load_collection(collection_name):
 
 def load_required(collection_name):
     try:
-        return load_collection(collection_name)
-    except Exception:
+        df = load_collection(collection_name)
+        return df
+    except Exception as e:
+        st.error(f"Failed to load collection '{collection_name}'")
+        st.exception(e)
         return pd.DataFrame()
 
 
@@ -405,6 +418,19 @@ def load_required(collection_name):
 # ============================================================
 
 student_metrics = load_required("student_metrics")
+
+if DEBUG_MONGO:
+    try:
+        db_debug = get_db()
+        st.sidebar.error(f"Connected DB: {db_debug.name}")
+        st.sidebar.error(f"Collections: {db_debug.list_collection_names()}")
+        st.sidebar.error(
+            f"student_metrics count: {db_debug['student_metrics'].count_documents({})}"
+        )
+    except Exception as e:
+        st.sidebar.error("MongoDB debug failed")
+        st.sidebar.exception(e)
+
 course_priorities = load_required("course_priorities")
 course_risk_summary = load_required("course_risk_summary")
 course_risk_concentration = load_required("course_risk_concentration")
@@ -760,10 +786,7 @@ with tab_overview:
                 color="avg_grade",
                 color_continuous_scale="Blues",
                 title="Average Grade by Course",
-                labels={
-                    "course_name": "Course",
-                    "avg_grade": "Average Grade (%)",
-                },
+                labels={"course_name": "Course", "avg_grade": "Average Grade (%)"},
                 hover_name="course_name",
                 hover_data={
                     "student_count": True,
@@ -775,7 +798,7 @@ with tab_overview:
 
             fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
             fig.update_layout(yaxis_range=[0, 100], xaxis_tickangle=-30, coloraxis_showscale=False)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
     with c2:
         if not course_risk_summary.empty:
@@ -789,10 +812,7 @@ with tab_overview:
                 color="avg_attendance",
                 color_continuous_scale="Blues",
                 title="Average Attendance by Course",
-                labels={
-                    "course_name": "Course",
-                    "avg_attendance": "Average Attendance (%)",
-                },
+                labels={"course_name": "Course", "avg_attendance": "Average Attendance (%)"},
                 hover_name="course_name",
                 hover_data={
                     "student_count": True,
@@ -804,7 +824,7 @@ with tab_overview:
 
             fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
             fig.update_layout(yaxis_range=[0, 100], xaxis_tickangle=-30, coloraxis_showscale=False)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
     if not course_risk_summary.empty:
         weakest_course = course_risk_summary.sort_values("avg_grade").iloc[0]
@@ -830,10 +850,7 @@ with tab_overview:
             color="priority_score",
             color_continuous_scale="Blues",
             title="Final Course Intervention Priority",
-            labels={
-                "priority_score": "Priority Score",
-                "course_name": "Course",
-            },
+            labels={"priority_score": "Priority Score", "course_name": "Course"},
             hover_name="course_name",
             hover_data={
                 "student_count": True,
@@ -846,7 +863,7 @@ with tab_overview:
 
         fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
         fig.update_layout(coloraxis_showscale=False)
-        st.plotly_chart(style_fig(fig, height=680), use_container_width=True)
+        show_chart(style_fig(fig, height=680))
 
         top_course = course_priorities.sort_values("priority_score", ascending=False).iloc[0]
         insight(
@@ -878,7 +895,7 @@ with tab_risk:
                 color_discrete_sequence=px.colors.sequential.Blues_r,
             )
             fig.update_traces(textinfo="label+percent+value", textfont_size=16)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
     with c2:
         if not course_risk_concentration.empty:
@@ -908,7 +925,7 @@ with tab_risk:
 
             fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
             fig.update_layout(yaxis_range=[0, 100], xaxis_tickangle=-30, coloraxis_showscale=False)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
     if not course_risk_concentration.empty:
         top_risk_course = course_risk_concentration.sort_values("High_or_Critical_Rate", ascending=False).iloc[0]
@@ -923,15 +940,11 @@ with tab_risk:
     st.markdown("### Highest-Risk Students")
 
     risk_students_chart = student_priorities.copy()
-
     if risk_students_chart.empty:
         risk_students_chart = top_risk_students.copy()
 
     if not risk_students_chart.empty:
-        risk_students_chart = risk_students_chart.sort_values(
-            "risk_score",
-            ascending=False,
-        ).head(12)
+        risk_students_chart = risk_students_chart.sort_values("risk_score", ascending=False).head(12)
 
         risk_students_chart["Student"] = (
             risk_students_chart["full_name"].astype(str)
@@ -948,10 +961,7 @@ with tab_risk:
             color="risk_score",
             color_continuous_scale="Blues",
             title="Top 12 Students by Risk Score",
-            labels={
-                "risk_score": "Risk Score",
-                "Student": "Student",
-            },
+            labels={"risk_score": "Risk Score", "Student": "Student"},
             hover_name="Student",
             hover_data={
                 "student_id": True,
@@ -962,26 +972,16 @@ with tab_risk:
             },
         )
 
-        fig.update_traces(
-            texttemplate="%{text:.2f}",
-            textposition="outside",
-        )
-
-        fig.update_layout(
-            xaxis_range=[0, 100],
-            coloraxis_showscale=False,
-        )
-
-        st.plotly_chart(style_fig(fig, height=760), use_container_width=True)
+        fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+        fig.update_layout(xaxis_range=[0, 100], coloraxis_showscale=False)
+        show_chart(style_fig(fig, height=760))
 
         highest_student = risk_students_chart.iloc[0]
-
         insight(
             f"The highest-risk student is <b>{highest_student['full_name']}</b> "
             f"from <b>{highest_student['course_name']}</b>, with a risk score of "
             f"<b>{highest_student['risk_score']:.2f}</b>."
         )
-
         recommendation(
             "Use this chart instead of student cards because it shows the highest-risk students clearly and supports faster comparison."
         )
@@ -1008,10 +1008,7 @@ with tab_concepts:
             color="concept_priority_score",
             color_continuous_scale="Blues",
             title="Top Concept Intervention Priorities",
-            labels={
-                "concept_priority_score": "Concept Priority Score",
-                "Concept": "Concept",
-            },
+            labels={"concept_priority_score": "Concept Priority Score", "Concept": "Concept"},
             hover_name="Concept",
             hover_data={
                 "total_attempts": True,
@@ -1024,7 +1021,7 @@ with tab_concepts:
 
         fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
         fig.update_layout(coloraxis_showscale=False)
-        st.plotly_chart(style_fig(fig, height=760), use_container_width=True)
+        show_chart(style_fig(fig, height=760))
 
         worst_concept = concept_priorities.sort_values("failure_rate_pct", ascending=False).iloc[0]
         insight(
@@ -1051,10 +1048,7 @@ with tab_concepts:
             color="failure_rate_pct",
             color_continuous_scale="Blues",
             title="Top 10 Concepts by Failure Rate",
-            labels={
-                "failure_rate_pct": "Failure Rate (%)",
-                "Concept": "Concept",
-            },
+            labels={"failure_rate_pct": "Failure Rate (%)", "Concept": "Concept"},
             hover_name="Concept",
             hover_data={
                 "total_attempts": True,
@@ -1067,16 +1061,14 @@ with tab_concepts:
 
         fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
         fig.update_layout(xaxis_range=[0, 100], coloraxis_showscale=False)
-        st.plotly_chart(style_fig(fig, height=720), use_container_width=True)
+        show_chart(style_fig(fig, height=720))
 
         worst_concept = df.sort_values("failure_rate_pct", ascending=False).iloc[0]
-
         insight(
             f"<b>{worst_concept['concept_name']}</b> is the clearest weakness, with a failure rate of "
             f"<b>{worst_concept['failure_rate_pct']:.2f}%</b> and an average score of "
             f"<b>{worst_concept['avg_score_pct']:.2f}%</b>."
         )
-
         recommendation(
             "Prioritize the highest-failure concepts first. These concepts should receive extra tutorials, simplified explanations, and practice assessments."
         )
@@ -1088,14 +1080,7 @@ with tab_concepts:
         df["Concept"] = df["concept_name"].astype(str) + " — " + df["course_name"].astype(str)
         df = df.sort_values("failure_rate_pct", ascending=False).head(10)
 
-        compare_df = df[
-            [
-                "Concept",
-                "failure_rate_pct",
-                "avg_score_pct",
-            ]
-        ].copy()
-
+        compare_df = df[["Concept", "failure_rate_pct", "avg_score_pct"]].copy()
         compare_df = compare_df.rename(
             columns={
                 "failure_rate_pct": "Failure Rate (%)",
@@ -1118,26 +1103,17 @@ with tab_concepts:
             barmode="group",
             text="Value",
             title="Failure Rate and Average Score Comparison",
-            labels={
-                "Value": "Percentage (%)",
-                "Concept": "Concept",
-                "Metric": "Metric",
-            },
+            labels={"Value": "Percentage (%)", "Concept": "Concept", "Metric": "Metric"},
             hover_name="Concept",
         )
 
         fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
-        fig.update_layout(
-            xaxis_range=[0, 100],
-            yaxis={"categoryorder": "total ascending"},
-        )
-
-        st.plotly_chart(style_fig(fig, height=760), use_container_width=True)
+        fig.update_layout(xaxis_range=[0, 100], yaxis={"categoryorder": "total ascending"})
+        show_chart(style_fig(fig, height=760))
 
         insight(
             "This chart is easier to read than the scatter plot because it directly compares each concept’s failure rate against its average score."
         )
-
         recommendation(
             "Use this view in the presentation because it clearly shows which concepts are failing and whether their average scores are also weak."
         )
@@ -1167,10 +1143,7 @@ with tab_behavior:
 
             summary = (
                 df.groupby("Attendance Level", observed=False)
-                .agg(
-                    Average_Grade=("avg_grade", "mean"),
-                    Student_Count=("avg_grade", "count"),
-                )
+                .agg(Average_Grade=("avg_grade", "mean"), Student_Count=("avg_grade", "count"))
                 .reset_index()
             )
 
@@ -1184,16 +1157,13 @@ with tab_behavior:
                 color="Average_Grade",
                 color_continuous_scale="Blues",
                 title="Average Grade by Attendance Level",
-                labels={
-                    "Average_Grade": "Average Grade (%)",
-                    "Student_Count": "Student Count",
-                },
+                labels={"Average_Grade": "Average Grade (%)", "Student_Count": "Student Count"},
                 hover_data={"Student_Count": True, "Average_Grade": ":.2f"},
             )
 
             fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
             fig.update_layout(yaxis_range=[0, 100], coloraxis_showscale=False)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
             insight(f"Attendance has a positive relationship with grades. The correlation is <b>{corr:.3f}</b>.")
             recommendation("Create alerts for students below 60% attendance and assign advisor follow-up.")
@@ -1213,10 +1183,7 @@ with tab_behavior:
 
             summary = (
                 df.groupby("Late Submission Level", observed=False)
-                .agg(
-                    Average_Grade=("avg_grade", "mean"),
-                    Student_Count=("avg_grade", "count"),
-                )
+                .agg(Average_Grade=("avg_grade", "mean"), Student_Count=("avg_grade", "count"))
                 .reset_index()
             )
 
@@ -1230,16 +1197,13 @@ with tab_behavior:
                 color="Average_Grade",
                 color_continuous_scale="Blues",
                 title="Average Grade by Late Submission Level",
-                labels={
-                    "Average_Grade": "Average Grade (%)",
-                    "Student_Count": "Student Count",
-                },
+                labels={"Average_Grade": "Average Grade (%)", "Student_Count": "Student Count"},
                 hover_data={"Student_Count": True, "Average_Grade": ":.2f"},
             )
 
             fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
             fig.update_layout(yaxis_range=[0, 100], coloraxis_showscale=False)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
             insight(f"Late submissions have a negative relationship with grades. The correlation is <b>{corr:.3f}</b>.")
             recommendation("Use deadline reminders and follow-up workflows for students with repeated late submissions.")
@@ -1292,7 +1256,7 @@ with tab_behavior:
 
         fig.update_traces(texttemplate="%{text:.3f}", textposition="outside")
         fig.update_layout(coloraxis_showscale=False)
-        st.plotly_chart(style_fig(fig, height=700), use_container_width=True)
+        show_chart(style_fig(fig, height=700))
 
         strongest = corr_df.sort_values("Correlation with Average Grade", ascending=False).iloc[0]
         insight(
@@ -1326,10 +1290,7 @@ with tab_ops:
                 color="high_or_critical_rate",
                 color_continuous_scale="Blues",
                 title="High/Critical Risk Rate by Instructor",
-                labels={
-                    "high_or_critical_rate": "High/Critical Risk Rate (%)",
-                    "instructor": "Instructor",
-                },
+                labels={"high_or_critical_rate": "High/Critical Risk Rate (%)", "instructor": "Instructor"},
                 hover_name="instructor",
                 hover_data={
                     "student_count": True,
@@ -1341,7 +1302,7 @@ with tab_ops:
 
             fig.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
             fig.update_layout(xaxis_range=[0, 100], coloraxis_showscale=False)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
             top_inst = instructor_summary.sort_values("high_or_critical_rate", ascending=False).iloc[0]
             insight(
@@ -1367,10 +1328,7 @@ with tab_ops:
                 color="absolute_difference",
                 color_continuous_scale="Blues",
                 title="Group Size Discrepancy",
-                labels={
-                    "absolute_difference": "Absolute Student Difference",
-                    "group_name": "Group",
-                },
+                labels={"absolute_difference": "Absolute Student Difference", "group_name": "Group"},
                 hover_name="group_name",
                 hover_data={
                     "course_name": True,
@@ -1382,7 +1340,7 @@ with tab_ops:
 
             fig.update_traces(texttemplate="%{text:.0f}", textposition="outside")
             fig.update_layout(coloraxis_showscale=False)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
             top_group = group_size_validation.sort_values("absolute_difference", ascending=False).iloc[0]
             insight(
@@ -1408,10 +1366,7 @@ with tab_ops:
                 color="avg_risk_score",
                 color_continuous_scale="Blues",
                 title="Average Risk Score by Course Category",
-                labels={
-                    "avg_risk_score": "Average Risk Score",
-                    "category": "Course Category",
-                },
+                labels={"avg_risk_score": "Average Risk Score", "category": "Course Category"},
                 hover_name="category",
                 hover_data={
                     "student_count": True,
@@ -1423,7 +1378,7 @@ with tab_ops:
 
             fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
             fig.update_layout(xaxis_range=[0, 100], coloraxis_showscale=False)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
     with c4:
         if not difficulty_summary.empty:
@@ -1438,10 +1393,7 @@ with tab_ops:
                 color="avg_risk_score",
                 color_continuous_scale="Blues",
                 title="Average Risk Score by Difficulty Level",
-                labels={
-                    "avg_risk_score": "Average Risk Score",
-                    "difficulty_level": "Difficulty Level",
-                },
+                labels={"avg_risk_score": "Average Risk Score", "difficulty_level": "Difficulty Level"},
                 hover_name="difficulty_level",
                 hover_data={
                     "student_count": True,
@@ -1453,7 +1405,7 @@ with tab_ops:
 
             fig.update_traces(texttemplate="%{text:.2f}", textposition="outside")
             fig.update_layout(xaxis_range=[0, 100], coloraxis_showscale=False)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
     if not category_summary.empty:
         top_cat = category_summary.sort_values("avg_risk_score", ascending=False).iloc[0]
@@ -1500,7 +1452,7 @@ with tab_segments:
 
             fig.update_traces(textposition="outside")
             fig.update_layout(coloraxis_showscale=False)
-            st.plotly_chart(style_fig(fig), use_container_width=True)
+            show_chart(style_fig(fig))
 
     with c2:
         if not student_segment_summary.empty:
@@ -1540,15 +1492,11 @@ with tab_segments:
                 barmode="group",
                 text="Value",
                 title="Learning Segment Profile",
-                labels={
-                    "Student Segment": "Student Segment",
-                    "Value": "Metric Value",
-                    "Metric": "Metric",
-                },
+                labels={"Student Segment": "Student Segment", "Value": "Metric Value", "Metric": "Metric"},
             )
 
             fig.update_traces(texttemplate="%{text:.1f}", textposition="outside")
-            st.plotly_chart(style_fig(fig, height=650), use_container_width=True)
+            show_chart(style_fig(fig, height=650))
 
     if not student_segment_summary.empty:
         risk_seg = student_segment_summary.sort_values("avg_risk_score", ascending=False).iloc[0]
@@ -1589,11 +1537,7 @@ with tab_segments:
             .rename(columns={"Student_Count": "Course_Total"})
         )
 
-        segment_course_risk = segment_course_risk.merge(
-            course_totals,
-            on="course_name",
-            how="left",
-        )
+        segment_course_risk = segment_course_risk.merge(course_totals, on="course_name", how="left")
 
         segment_course_risk["Segment_Percentage"] = (
             segment_course_risk["Student_Count"]
@@ -1623,11 +1567,7 @@ with tab_segments:
             },
         )
 
-        fig.update_traces(
-            texttemplate="%{text:.1f}%",
-            textposition="inside",
-        )
-
+        fig.update_traces(texttemplate="%{text:.1f}%", textposition="inside")
         fig.update_layout(
             barmode="stack",
             xaxis_range=[0, 100],
@@ -1636,7 +1576,7 @@ with tab_segments:
             xaxis_title="Segment Share (%)",
         )
 
-        st.plotly_chart(style_fig(fig, height=720), use_container_width=True)
+        show_chart(style_fig(fig, height=720))
 
     st.markdown("### Highest-Risk Segment per Course")
 
@@ -1693,23 +1633,14 @@ with tab_segments:
             },
         )
 
-        fig.update_traces(
-            texttemplate="%{text:.1f}",
-            textposition="outside",
-        )
+        fig.update_traces(texttemplate="%{text:.1f}", textposition="outside")
+        fig.update_layout(xaxis_range=[0, 100], legend_title_text="Student Segment")
+        show_chart(style_fig(fig, height=720))
 
-        fig.update_layout(
-            xaxis_range=[0, 100],
-            legend_title_text="Student Segment",
-        )
-
-        st.plotly_chart(style_fig(fig, height=720), use_container_width=True)
-
-        highest_risk_segment = (
-            highest_segment_per_course
-            .sort_values("Average_Risk_Score", ascending=False)
-            .iloc[0]
-        )
+        highest_risk_segment = highest_segment_per_course.sort_values(
+            "Average_Risk_Score",
+            ascending=False,
+        ).iloc[0]
 
         insight(
             f"The highest-risk course/segment combination is "
@@ -1717,7 +1648,6 @@ with tab_segments:
             f"<b>{highest_risk_segment['course_name']}</b>, with an average risk score of "
             f"<b>{highest_risk_segment['Average_Risk_Score']:.2f}</b>."
         )
-
         recommendation(
             "This chart is clearer than the heatmap because it shows only the most important risk segment inside each course."
         )
@@ -1836,15 +1766,12 @@ with tab_quality:
         color="Count",
         color_continuous_scale="Blues",
         title="Data Quality and Validation Summary",
-        labels={
-            "Quality Area": "Quality Area",
-            "Count": "Count",
-        },
+        labels={"Quality Area": "Quality Area", "Count": "Count"},
     )
 
     fig.update_traces(textposition="outside")
     fig.update_layout(coloraxis_showscale=False, xaxis_tickangle=-25)
-    st.plotly_chart(style_fig(fig), use_container_width=True)
+    show_chart(style_fig(fig))
 
     insight(
         "The dataset was cleaned, validated across files, and transformed into dashboard-ready analytical tables."
